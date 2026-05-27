@@ -1,0 +1,312 @@
+
+import json
+import sys
+import webbrowser
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from urllib.parse import parse_qs, urlparse
+
+product = {}
+
+class Mart:
+    def __init__(self, price, amount):
+        self.price = float(price)
+        self.amount = int(amount)
+
+    def add_amount(self, amount):
+        self.amount += int(amount)
+        return self.amount
+
+PRODUCT_FILE = 'product.txt'
+
+HTML_PAGE = '''<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <title>마켓 재고 관리</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 32px; }
+    label, input, button { font-size: 1rem; }
+    input { margin: 4px 0; width: 100%; max-width: 300px; }
+    button { margin: 8px 0; padding: 8px 12px; }
+    table { border-collapse: collapse; width: 100%; max-width: 640px; margin-top: 16px; }
+    th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+    th { background: #f4f4f4; }
+    .error { color: red; }
+    .message { color: green; }
+  </style>
+</head>
+<body>
+  <h1>마켓 재고 관리</h1>
+  <div>
+    <button onclick="loadProducts()">재고 갱신</button>
+    <button onclick="saveProducts()">파일 저장</button>
+    <button onclick="resetInventory()">재고 초기화</button>
+  </div>
+
+  <div id="feedback"></div>
+
+  <h2>현재 재고</h2>
+  <div id="inventory"></div>
+
+  <h2>상품 추가</h2>
+  <form id="add-form" onsubmit="event.preventDefault(); addProduct();">
+    <label>상품명<br /><input id="add-name" required /></label><br />
+    <label>가격<br /><input id="add-price" type="number" step="0.01" required /></label><br />
+    <label>수량<br /><input id="add-amount" type="number" required /></label><br />
+    <button type="submit">추가</button>
+  </form>
+
+  <h2>수량 추가</h2>
+  <form id="quant-form" onsubmit="event.preventDefault(); addQuantity();">
+    <label>상품명<br /><input id="quant-name" required /></label><br />
+    <label>추가 수량<br /><input id="quant-amount" type="number" required /></label><br />
+    <button type="submit">수량 추가</button>
+  </form>
+
+  <script>
+    async function request(path, method = 'GET', body = null) {
+      const options = { method, headers: {} };
+      if (body) {
+        options.headers['Content-Type'] = 'application/json;charset=utf-8';
+        options.body = JSON.stringify(body);
+      }
+      const resp = await fetch(path, options);
+      return await resp.json();
+    }
+
+    async function loadProducts() {
+      const data = await request('/api/products');
+      const container = document.getElementById('inventory');
+      if (data.products.length === 0) {
+        container.innerHTML = '<p>재고가 없습니다.</p>';
+        return;
+      }
+      const rows = data.products.map(item =>
+        `<tr><td>${item.name}</td><td>${item.price}</td><td>${item.amount}</td></tr>`
+      ).join('');
+      container.innerHTML = `<table><thead><tr><th>상품</th><th>가격</th><th>수량</th></tr></thead><tbody>${rows}</tbody></table>`;
+    }
+
+    function showMessage(message, isError = false) {
+      const el = document.getElementById('feedback');
+      el.innerHTML = `<p class="${isError ? 'error' : 'message'}">${message}</p>`;
+      setTimeout(() => { el.innerHTML = ''; }, 4000);
+    }
+
+    async function addProduct() {
+      try {
+        const name = document.getElementById('add-name').value.trim();
+        const price = document.getElementById('add-price').value;
+        const amount = document.getElementById('add-amount').value;
+        const result = await request('/api/product', 'POST', { name, price, amount });
+        if (result.error) throw new Error(result.error);
+        showMessage(result.message);
+        loadProducts();
+      } catch (err) {
+        showMessage(err.message, true);
+      }
+    }
+
+    async function addQuantity() {
+      try {
+        const name = document.getElementById('quant-name').value.trim();
+        const amount = document.getElementById('quant-amount').value;
+        const result = await request('/api/add_quant', 'POST', { name, amount });
+        if (result.error) throw new Error(result.error);
+        showMessage(result.message);
+        loadProducts();
+      } catch (err) {
+        showMessage(err.message, true);
+      }
+    }
+
+    async function saveProducts() {
+      const result = await request('/api/save', 'POST');
+      showMessage(result.message || '저장 완료');
+    }
+
+    async function resetInventory() {
+      if (!confirm('재고를 초기화하시겠습니까?')) return;
+      const result = await request('/api/reset', 'POST');
+      showMessage(result.message || '재고 초기화 완료');
+      loadProducts();
+    }
+
+    window.addEventListener('load', loadProducts);
+  </script>
+</body>
+</html>
+'''
+
+
+def load_products():
+    global product
+    product = {}
+    try:
+        with open(PRODUCT_FILE, 'r', encoding='utf-8') as f:
+            for line in f:
+                name, price, amount = line.strip().split(',')
+                product[name] = Mart(price, amount)
+    except FileNotFoundError:
+        with open(PRODUCT_FILE, 'w', encoding='utf-8'):
+            pass
+
+
+def save_products():
+    with open(PRODUCT_FILE, 'w', encoding='utf-8') as f:
+        for name, item in product.items():
+            f.write(f"{name},{item.price},{item.amount}\n")
+
+
+def product_list():
+    return [
+        {'name': name, 'price': item.price, 'amount': item.amount}
+        for name, item in product.items()
+    ]
+
+
+def parse_json_body():
+    length = int(self.headers.get('Content-Length', 0))
+    raw = self.rfile.read(length).decode('utf-8') if length else ''
+    try:
+        return json.loads(raw) if raw else {}
+    except json.JSONDecodeError:
+        return parse_qs(raw)
+
+
+class MartRequestHandler(BaseHTTPRequestHandler):
+    def _set_headers(self, status=200, content_type='application/json'):
+        self.send_response(status)
+        self.send_header('Content-Type', f'{content_type}; charset=utf-8')
+        self.end_headers()
+
+    def do_GET(self):
+        if self.path == '/':
+            self._set_headers(content_type='text/html')
+            self.wfile.write(HTML_PAGE.encode('utf-8'))
+            return
+        if self.path.startswith('/api/products'):
+            self._set_headers()
+            self.wfile.write(json.dumps({'products': product_list()}, ensure_ascii=False).encode('utf-8'))
+            return
+        self.send_error(404, 'Not Found')
+
+    def do_POST(self):
+        content_type = self.headers.get('Content-Type', '')
+        body = self.rfile.read(int(self.headers.get('Content-Length', 0))).decode('utf-8')
+        data = {}
+        if 'application/json' in content_type:
+            try:
+                data = json.loads(body)
+            except json.JSONDecodeError:
+                data = {}
+        else:
+            data = {k: v[0] for k, v in parse_qs(body).items()}
+
+        if self.path == '/api/product':
+            name = data.get('name', '').strip()
+            price = data.get('price', '').strip()
+            amount = data.get('amount', '').strip()
+            if not name or not price or not amount:
+                return self._error('모든 필드를 입력해야 합니다.')
+            try:
+                product[name] = Mart(price, amount)
+            except ValueError:
+                return self._error('가격과 수량은 숫자여야 합니다.')
+            return self._success(f'상품 {name}이(가) 추가되었습니다.')
+
+        if self.path == '/api/add_quant':
+            name = data.get('name', '').strip()
+            amount = data.get('amount', '').strip()
+            if not name or not amount:
+                return self._error('상품명과 추가 수량을 입력해야 합니다.')
+            if name not in product:
+                return self._error('상품을 찾을 수 없습니다.')
+            try:
+                new_amount = product[name].add_amount(amount)
+            except ValueError:
+                return self._error('추가 수량은 숫자여야 합니다.')
+            return self._success(f'{name}의 수량이 {new_amount}으로 변경되었습니다.')
+
+        if self.path == '/api/save':
+            save_products()
+            return self._success('product.txt에 저장되었습니다.')
+
+        if self.path == '/api/reset':
+            product.clear()
+            save_products()
+            return self._success('재고가 초기화되었습니다.')
+
+        self.send_error(404, 'Not Found')
+
+    def _success(self, message):
+        self._set_headers()
+        self.wfile.write(json.dumps({'message': message}, ensure_ascii=False).encode('utf-8'))
+
+    def _error(self, message, status=400):
+        self._set_headers(status=status)
+        self.wfile.write(json.dumps({'error': message}, ensure_ascii=False).encode('utf-8'))
+
+    def log_message(self, format, *args):
+        return
+
+
+def run_browser_server(host='127.0.0.1', port=8000):
+    server = HTTPServer((host, port), MartRequestHandler)
+    url = f'http://{host}:{port}/'
+    print(f'브라우저에서 열기: {url}')
+    try:
+        webbrowser.open(url)
+    except Exception:
+        pass
+    server.serve_forever()
+
+
+def run_cli():
+    print('명령어 종류:[add,save,add_quant,check,reset]')
+    while True:
+        try:
+            print('무엇을 할 것인가? >>>', end='', flush=True)
+            input_content = input()
+        except (EOFError, KeyboardInterrupt):
+            print('\n입력이 중단되어 종료합니다.')
+            break
+        if input_content == 'add':
+            name_of_product = input('상품명 입력 >>>')
+            price_of_product = float(input('상품 가격 입력 >>>'))
+            amount_of_product = int(input('상품 수량 입력 >>>'))
+            product[name_of_product] = Mart(price_of_product, amount_of_product)
+            for name, item in product.items():
+                print(f'상품: {name}, 가격: {item.price}, 수량: {item.amount}')
+        elif input_content == 'save':
+            save_products()
+            print('저장 완료')
+            break
+        elif input_content == 'add_quant':
+            a = input('어떤 상품의 수량을 추가할 것인가?>>>')
+            if a in product:
+                quant = input('추가 수량 입력 >>>')
+                new_amount = product[a].add_amount(quant)
+                print(f'{a}: {new_amount}')
+            else:
+                print('상품을 찾을 수 없음.')
+        elif input_content == 'check':
+            if product:
+                for name, item in product.items():
+                    print(f'상품: {name}, 가격: {item.price}, 수량: {item.amount}')
+            else:
+                print('재고가 없음.')
+        elif input_content == 'reset':
+            product.clear()
+            save_products()
+            print('재고가 초기화되었습니다.')
+        else:
+            print('알 수 없는 명령어')
+
+
+if __name__ == '__main__':
+    load_products()
+    if len(sys.argv) > 1 and sys.argv[1] in ('cli', '--cli'):
+        run_cli()
+    else:
+        run_browser_server()
