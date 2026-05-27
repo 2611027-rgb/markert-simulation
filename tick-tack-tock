@@ -1,0 +1,71 @@
+import ipywidgets as widgets
+from IPython.display import display
+
+# --- 게임 상태 변수 초기화 ---
+current_player = 'X'
+board = [''] * 9
+game_over = False
+
+# 메시지를 보여줄 레이블
+status_label = widgets.Label(value="플레이어 X의 차례입니다. 칸을 클릭하세요!")
+
+# 9개의 게임 버튼
+buttons = [
+    widgets.Button(
+        description='',
+        layout=widgets.Layout(width='80px', height='80px', margin='4px'),
+        style=widgets.ButtonStyle(button_color='#f0f0f0')
+    ) for _ in range(9)
+]
+
+def check_win(b, p):
+    win_conditions = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]]
+    return any(all(b[idx] == p for idx in cond) for cond in win_conditions)
+
+def on_button_click(btn):
+    global current_player, game_over, board
+    if game_over: return
+    idx = buttons.index(btn)
+    if board[idx] != '': return
+    
+    board[idx] = current_player
+    btn.description = current_player
+    btn.style.button_color = '#d1e7dd' if current_player == 'X' else '#f8d7da'
+    
+    if check_win(board, current_player):
+        status_label.value = f'🎉 플레이어 {current_player} 승리!'
+        game_over = True
+        return
+    if '' not in board:
+        status_label.value = '🤝 무승부!'
+        game_over = True
+        return
+        
+    current_player = 'O' if current_player == 'X' else 'X'
+    status_label.value = f"플레이어 {current_player}의 차례입니다."
+
+def reset_game(b):
+    """모든 텍스트와 상태를 초기화하는 함수"""
+    global current_player, game_over, board
+    current_player = 'X'
+    board = [''] * 9
+    game_over = False
+    
+    # 1. 상단 안내 문구 초기화 (완전히 비우거나 초기 메시지로 설정)
+    status_label.value = "" 
+    
+    # 2. 모든 버튼의 텍스트(description)와 색상 초기화
+    for btn in buttons:
+        btn.description = ""
+        btn.style.button_color = '#f0f0f0'
+    
+    status_label.value = "게임을 리셋했습니다. 플레이어 X부터 시작하세요!"
+
+for btn in buttons:
+    btn.on_click(on_button_click)
+
+reset_btn = widgets.Button(description='전체 초기화', button_style='danger', layout=widgets.Layout(width='264px', margin='10px 0 0 4px'))
+reset_btn.on_click(reset_game)
+
+grid = widgets.VBox([widgets.HBox(buttons[0:3]), widgets.HBox(buttons[3:6]), widgets.HBox(buttons[6:9])])
+display(widgets.VBox([status_label, grid, reset_btn]))
